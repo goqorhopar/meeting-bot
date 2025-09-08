@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: meeting-bot
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    startCommand: "python bot.py"
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PORT
+        value: "10000"
