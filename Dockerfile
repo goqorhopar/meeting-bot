@@ -25,19 +25,17 @@ RUN apt-get update && apt-get install -y curl && \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
-# Копируем и устанавливаем Node.js зависимости
+# Устанавливаем Node.js зависимости (если есть)
 COPY package*.json ./
 RUN if [ -f package.json ]; then npm install; fi
 
-# Копируем и устанавливаем Python зависимости
+# Устанавливаем Python зависимости
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Копируем весь проект
 COPY . .
 
-# Если бот — web-сервис, он должен слушать $PORT
-# ENV PORT=5000
-
-# Команда запуска (замени bot.py на свой основной файл)
+# Запуск бота
 CMD ["python", "bot.py"]
+
