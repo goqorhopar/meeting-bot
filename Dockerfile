@@ -1,13 +1,14 @@
-# Используем официальный образ Python
+# Базовый образ Python
 FROM python:3.11-slim
 
 # Рабочая директория
 WORKDIR /app
 
-# Устанавливаем системные зависимости
-RUN apt-get update && apt-get install -y \
+# Устанавливаем Node.js LTS и системные зависимости
+RUN apt-get update && apt-get install -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y \
     nodejs \
-    npm \
     libnss3-dev \
     libasound2 \
     libatk1.0-0 \
@@ -21,19 +22,22 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     libdbus-glib-1-2 \
     ffmpeg \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
-# Копируем package.json если есть
+# Копируем и устанавливаем Node.js зависимости
 COPY package*.json ./
-RUN npm install
+RUN if [ -f package.json ]; then npm install; fi
 
-# Копируем requirements.txt и устанавливаем Python пакеты
+# Копируем и устанавливаем Python зависимости
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем все файлы проекта
+# Копируем весь проект
 COPY . .
 
-# Запускаем бота
+# Если бот — web-сервис, он должен слушать $PORT
+# ENV PORT=5000
+
+# Команда запуска (замени bot.py на свой основной файл)
 CMD ["python", "bot.py"]
