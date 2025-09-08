@@ -1,0 +1,8 @@
+[build]
+builder = "dockerfile"
+
+[deploy]
+startCommand = "python bot.py"
+
+[variables]
+PYTHONUNBUFFERED = "1"
