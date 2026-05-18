@@ -12,12 +12,15 @@ This application:
 
 import logging
 import re
+import os
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
-from fastapi import FastAPI, Request, HTTPException, status
+from fastapi import FastAPI, Request, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_limiter import FastAPILimiter
+from fastapi_limiter.depends import RateLimiter
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -72,12 +75,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     TELEGRAM_USER_ID = int(Config.TELEGRAM_USER_ID) if Config.TELEGRAM_USER_ID else None
     
+    # Initialize rate limiter
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        try:
+            import redis.asyncio as redis
+            redis_client = redis.from_url(redis_url)
+            await FastAPILimiter.init(redis_client)
+            logger.info("✅ Rate limiter initialized with Redis")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to initialize rate limiter: {e}")
+    
     yield
     
     # Shutdown
     logger.info("👋 Shutting down Meeting Bot...")
     if bot:
         await bot.session.close()
+    if redis_url:
+        try:
+            await FastAPILimiter.shutdown()
+        except Exception:
+            pass
 
 
 # Initialize FastAPI app
@@ -88,18 +107,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware
+# Add CORS middleware with configurable origins
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins if allowed_origins != ["*"] else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Global variables
-bot: Bot | None = None
-TELEGRAM_USER_ID: int | None = None
+bot: Optional[Bot] = None
+TELEGRAM_USER_ID: Optional[int] = None
 
 # LangChain setup
 prompt = ChatPromptTemplate.from_messages([
@@ -115,7 +135,8 @@ async def root() -> dict:
     return {
         "status": "ok",
         "service": "Meeting Bot",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "timestamp": __import__('datetime').datetime.utcnow().isoformat() + "Z"
     }
 
 
@@ -126,7 +147,8 @@ async def health_check() -> dict:
     return {
         "status": "healthy" if not config_errors else "degraded",
         "config_valid": len(config_errors) == 0,
-        "missing_config": config_errors if config_errors else None
+        "missing_config": config_errors if config_errors else None,
+        "timestamp": __import__('datetime').datetime.utcnow().isoformat() + "Z"
     }
 
 
@@ -143,13 +165,15 @@ async def readiness_check() -> JSONResponse:
 
 
 @app.post("/webhook")
-async def handle_webhook(request: Request) -> dict:
+async def handle_webhook(request: Request, rate_limit: str = Depends(RateLimiter(times=10, seconds=60))) -> dict:
     """
     Handle incoming Telegram webhook requests.
     
     Expects Telegram Update object with message containing:
     - Meeting URL
     - Optional lead ID (format: "url id:123")
+    
+    Rate limited to 10 requests per minute per IP.
     """
     try:
         update = await request.json()
