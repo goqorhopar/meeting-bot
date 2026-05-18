@@ -10,6 +10,7 @@ This module provides tools for:
 
 import subprocess
 import logging
+import time
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -258,9 +259,6 @@ class MeetingTools:
             logger.error(f"❌ Ошибка Bitrix24: {e}", exc_info=True)
             return f"❌ Ошибка Bitrix24: {e}"
 
-
-# Импортируем time после определения всех функций чтобы избежать circular import issues
-import time
 
 # Инициализируем модели при импорте модуля
 try:

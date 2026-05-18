@@ -40,7 +40,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
 
 # Копируем и устанавливаем Node.js зависимости
 COPY package*.json ./
-RUN npm install
+RUN npm install --production
 
 # Копируем и устанавливаем Python зависимости
 COPY requirements.txt ./
@@ -55,10 +55,14 @@ RUN mkdir -p recordings transcripts reports
 # Переменные окружения
 ENV PYTHONUNBUFFERED=1
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=false
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 # Экспонируем порт для FastAPI
 EXPOSE 8080
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
 # Запуск бота через uvicorn
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
-

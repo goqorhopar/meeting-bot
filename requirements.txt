@@ -16,3 +16,5 @@ pydantic==2.5.0
 httpx==0.25.0
 google-generativeai==0.3.0
 aiogram==3.3.0
+fastapi-limiter==0.1.6
+redis==5.0.1
