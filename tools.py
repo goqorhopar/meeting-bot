@@ -19,9 +19,8 @@ import asyncio
 import json
 
 import whisper
-import google.generativeai as genai
 import requests
-from langchain.agents import tool
+from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from config import Config
@@ -31,7 +30,24 @@ logger = logging.getLogger(__name__)
 
 # Initialize models at module level
 whisper_model: Optional[whisper.Whisper] = None
-gemini_model: Optional[genai.GenerativeModel] = None
+
+
+def get_gemini_model():
+    """Lazy load Gemini model to avoid import errors."""
+    try:
+        from google import genai as google_genai
+        return google_genai
+    except ImportError:
+        pass
+    
+    try:
+        import google.generativeai as genai
+        return genai
+    except ImportError:
+        raise ImportError(
+            "Google Generative AI not available. "
+            "Install with: pip install google-generativeai"
+        )
 
 
 class ToolResult(BaseModel):
@@ -44,7 +60,7 @@ class ToolResult(BaseModel):
 
 def initialize_models():
     """Initialize Whisper and Gemini models with error handling."""
-    global whisper_model, gemini_model
+    global whisper_model
     
     if whisper_model is None:
         try:
@@ -54,18 +70,17 @@ def initialize_models():
         except Exception as e:
             logger.error(f"Failed to load Whisper model: {e}")
             raise
+
+
+def get_gemini_client():
+    """Get Gemini client instance with proper error handling."""
+    genai = get_gemini_model()
     
-    if gemini_model is None:
-        try:
-            logger.info("Initializing Gemini model")
-            if not Config.GEMINI_API_KEY:
-                raise ValueError("GEMINI_API_KEY is not configured")
-            genai.configure(api_key=Config.GEMINI_API_KEY)
-            gemini_model = genai.GenerativeModel("gemini-1.5-flash")
-            logger.info("✅ Gemini model initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize Gemini model: {e}")
-            raise
+    if not Config.GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY is not configured")
+    
+    genai.configure(api_key=Config.GEMINI_API_KEY)
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 
 class MeetingTools:
