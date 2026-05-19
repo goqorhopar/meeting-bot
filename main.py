@@ -26,8 +26,8 @@ from fastapi_limiter.depends import RateLimiter
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from langchain.agents import AgentExecutor, create_structured_chat_agent
-from langchain_community.chat_models import ChatGoogleGenerativeAI
+from langchain_classic.agents import AgentExecutor, create_structured_chat_agent
+from langchain_core.tools import Tool
 from langchain_core.prompts import ChatPromptTemplate
 
 from tools import MeetingTools, initialize_models
