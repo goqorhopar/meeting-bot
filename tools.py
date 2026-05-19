@@ -281,8 +281,11 @@ class MeetingTools:
                 logger.warning(f"⚠️ Транскрипция слишком большая, обрезается до {max_tokens} токенов")
                 transcript = transcript[:max_tokens * 4]
             
-            prompt = Config.PROMPT_TEMPLATE.get('ru', Config.PROMPT_TEMPLATE['en'])
-            full_prompt = f"{prompt}\n\nТранскрипция:\n{transcript}"
+            prompt_template = Config.PROMPT_TEMPLATE.get('ru', Config.PROMPT_TEMPLATE['en'])
+            full_prompt = f"{prompt_template}\n\nТранскрипция:\n{transcript}"
+            
+            # Get Gemini model and generate response
+            gemini_model = get_gemini_client()
             
             try:
                 response = gemini_model.generate_content(

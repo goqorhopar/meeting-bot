@@ -71,6 +71,11 @@ class MeetingRecorder {
         console.log('📞 Joining Google Meet:', meetingUrl);
         
         try {
+            // Validate URL format
+            if (!meetingUrl || !meetingUrl.startsWith('http')) {
+                throw new Error('Invalid meeting URL');
+            }
+            
             await this.page.goto(meetingUrl, { waitUntil: 'networkidle2', timeout: 30000 });
             await this.sleep(3000);
             

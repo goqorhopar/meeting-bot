@@ -38,7 +38,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
     networks:
       - meeting-bot-network
     deploy:
@@ -71,46 +71,8 @@ services:
           cpus: '0.5'
           memory: 256M
 
-  # Optional: PostgreSQL for persistent storage (future use)
-  # Uncomment if you need database storage
-  # postgres:
-  #   image: postgres:15-alpine
-  #   container_name: meeting-bot-db
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_DB: meetingbot
-  #     POSTGRES_USER: meetingbot
-  #     POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
-  #   volumes:
-  #     - postgres-data:/var/lib/postgresql/data
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U meetingbot"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #   networks:
-  #     - meeting-bot-network
-
-  # Optional: Nginx reverse proxy for production
-  # Uncomment for production deployment with SSL
-  # nginx:
-  #   image: nginx:alpine
-  #   container_name: meeting-bot-nginx
-  #   restart: unless-stopped
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
-  #     - ./ssl:/etc/nginx/ssl:ro
-  #   depends_on:
-  #     - meeting-bot
-  #   networks:
-  #     - meeting-bot-network
-
 volumes:
   redis-data:
-  # postgres-data:
 
 networks:
   meeting-bot-network:

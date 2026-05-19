@@ -14,9 +14,11 @@ import asyncio
 import logging
 import re
 import os
+import json
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
@@ -29,6 +31,7 @@ from aiogram.client.default import DefaultBotProperties
 from langchain_classic.agents import AgentExecutor, create_structured_chat_agent
 from langchain_core.tools import Tool
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from tools import MeetingTools, initialize_models
 from config import Config
@@ -123,12 +126,7 @@ app.add_middleware(
 bot: Optional[Bot] = None
 TELEGRAM_USER_ID: Optional[int] = None
 
-# LangChain setup
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "Ты - бот-помощник для анализа встреч. Используй инструменты, чтобы подключиться к встрече, расшифровать, проанализировать и отправить отчет."),
-    ("human", "{input}"),
-    ("ai", "Я готов. Что мне нужно сделать?")
-])
+# LangChain setup - moved to process_meeting for lazy loading
 
 
 @app.get("/")
@@ -179,9 +177,12 @@ async def handle_webhook(request: Request, rate_limit: str = Depends(RateLimiter
     """
     try:
         update = await request.json()
-    except Exception as e:
+    except json.JSONDecodeError as e:
         logger.error(f"Failed to parse webhook JSON: {e}")
         return {"status": "error", "message": "Invalid JSON"}
+    except Exception as e:
+        logger.error(f"Unexpected error parsing webhook: {e}")
+        return {"status": "error", "message": "Server error"}
     
     # Validate message structure
     if not update.get("message"):
@@ -215,6 +216,18 @@ async def handle_webhook(request: Request, rate_limit: str = Depends(RateLimiter
     
     url = match.group(1).rstrip(',')
     lead_id = match.group(2) if match.group(2) else "без_ID"
+    
+    # Validate URL scheme and domain
+    try:
+        parsed_url = urlparse(url)
+        if parsed_url.scheme not in ('http', 'https'):
+            raise ValueError("Invalid URL scheme")
+        if not parsed_url.netloc:
+            raise ValueError("Invalid URL domain")
+    except Exception as e:
+        logger.warning(f"Invalid URL format: {url} - {e}")
+        await send_telegram_message("❌ Неверный формат ссылки на встречу")
+        return {"status": "ok", "message": "Invalid URL format"}
     
     logger.info(f"📞 Processing meeting: {url[:50]}... Lead ID: {lead_id}")
     
@@ -276,6 +289,13 @@ async def process_meeting(url: str, lead_id: str) -> str:
     # Validate URL format
     if not re.match(r'^https?://', url):
         raise ValueError(f"Invalid meeting URL: {url}")
+    
+    # Create LangChain prompt template
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "Ты - бот-помощник для анализа встреч. Используй инструменты, чтобы подключиться к встрече, расшифровать, проанализировать и отправить отчет."),
+        ("human", "{input}"),
+        ("ai", "Я готов. Что мне нужно сделать?")
+    ])
     
     # Initialize LangChain agent with proper error handling
     try:
