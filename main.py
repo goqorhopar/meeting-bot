@@ -217,14 +217,19 @@ async def handle_webhook(request: Request, rate_limit: str = Depends(RateLimiter
     
     # Process meeting asynchronously (fire and forget for now)
     # In production, you'd want to use a task queue like Celery
+    asyncio.create_task(process_meeting_safe(url, lead_id))
+    
+    return {"status": "ok"}
+
+
+async def process_meeting_safe(url: str, lead_id: str) -> None:
+    """Wrapper for process_meeting with error handling for background tasks."""
     try:
         result = await process_meeting(url, lead_id)
         await send_telegram_message(f"✅ Готово! Вот отчет:\n\n{result}")
     except Exception as e:
         logger.error(f"❌ Error processing meeting: {e}", exc_info=True)
         await send_telegram_message(f"❌ Произошла ошибка: {str(e)[:500]}")
-    
-    return {"status": "ok"}
 
 
 async def send_telegram_message(text: str) -> bool:
