@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 import threading
+import asyncio
 
 import whisper
 import google.generativeai as genai
@@ -121,6 +122,18 @@ class MeetingTools:
         except Exception as e:
             logger.error(f"❌ Ошибка записи встречи: {e}", exc_info=True)
             return ""
+        finally:
+            # Cleanup: ensure processes are terminated
+            try:
+                if proc_browser.poll() is None:
+                    proc_browser.kill()
+            except Exception:
+                pass
+            try:
+                if 'proc_ffmpeg' in locals() and proc_ffmpeg.poll() is None:
+                    proc_ffmpeg.kill()
+            except Exception:
+                pass
 
     @staticmethod
     @tool
@@ -237,7 +250,12 @@ class MeetingTools:
             }
             
             webhook_url = f"{Config.BITRIX_WEBHOOK.rstrip('/')}/crm.lead.update.json"
-            response = requests.post(webhook_url, json=data, timeout=30)
+            response = requests.post(
+                webhook_url, 
+                json=data, 
+                timeout=30,
+                headers={"Content-Type": "application/json"}
+            )
             response.raise_for_status()
             result = response.json()
             

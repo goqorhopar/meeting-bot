@@ -186,15 +186,33 @@ curl -X POST http://localhost:8080/webhook \
 4. **Input Validation** - URL parsing and sanitization
 5. **Environment Variables** - Secrets stored in environment, not code
 6. **Health Checks** - Separate endpoints for liveness/readiness
+7. **Process Cleanup** - Proper subprocess termination in finally blocks
+8. **Error Handling** - Comprehensive exception handling with graceful degradation
+9. **HTTPS Enforcement** - Nginx configuration redirects HTTP to HTTPS
+10. **Security Headers** - X-Frame-Options, X-Content-Type-Options, CSP
 
 ### Security Recommendations
 
 - Never commit `.env` file to version control
 - Use HTTPS in production
 - Rotate API keys regularly
-- Restrict CORS origins in production
+- Restrict CORS origins in production (set `ALLOWED_ORIGINS` specifically)
 - Monitor rate limit violations
 - Enable audit logging for compliance
+- Run security scans: `pip install safety bandit && safety check -r requirements.txt`
+
+### Dependency Security
+
+Run regular security audits:
+```bash
+# Check Python dependencies
+pip install safety
+safety check -r requirements.txt
+
+# Check for vulnerabilities
+pip install bandit
+bandit -r *.py
+```
 
 ## 🚢 Deployment
 
@@ -232,7 +250,7 @@ Solution: Ensure all Chrome dependencies are installed
 ```
 Solution: Check audio device configuration
 - Windows: Install VB-Audio Virtual Cable
-- Linux: Use PulseAudio or ALSA
+- Linux: Use PulseAudio or ALSA (AUDIO_DEVICE=pulse)
 - macOS: Install BlackHole
 ```
 
@@ -241,6 +259,64 @@ Solution: Check audio device configuration
 Solution: Use smaller model or upgrade hardware
 - Set WHISPER_MODEL=tiny for faster processing
 - Use GPU acceleration if available
+```
+
+**Issue: Rate limiting errors**
+```
+Solution: Check Redis connection
+- Ensure Redis is running: docker-compose up redis
+- Verify REDIS_URL environment variable
+- Check rate limit: 10 requests per minute per IP
+```
+
+## 📊 Monitoring & Observability
+
+### Health Endpoints
+
+| Endpoint | Description | Use Case |
+|----------|-------------|----------|
+| `/` | Basic health check | Load balancer ping |
+| `/health` | Detailed health with config status | Monitoring dashboards |
+| `/ready` | Kubernetes readiness probe | K8s deployments |
+
+### Logging
+
+Logs are structured with timestamps and levels:
+```
+2024-01-15 10:30:00 - main - INFO - 🚀 Starting Meeting Bot...
+2024-01-15 10:30:01 - config - INFO - ✅ Configuration validated successfully
+```
+
+Set `LOG_LEVEL=DEBUG` for verbose logging in development.
+
+### Metrics to Monitor
+
+- Webhook response times
+- Meeting processing duration
+- Transcription accuracy
+- Bitrix update success rate
+- Rate limit violations
+
+## 🔄 Development Workflow
+
+```bash
+# Local development
+make dev
+
+# Run tests
+make test
+
+# Build Docker
+make docker-build
+
+# Full stack with Docker Compose
+make docker-compose-up
+
+# View logs
+make docker-compose-logs
+
+# Clean up
+make clean
 ```
 
 ## 📄 License

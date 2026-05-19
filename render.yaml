@@ -3,8 +3,9 @@ services:
     name: meeting-bot
     env: docker
     dockerfilePath: ./Dockerfile
-    plan: free
-    startCommand: "python bot.py"
+    plan: standard
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: ENVIRONMENT
+        value: production
