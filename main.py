@@ -10,11 +10,13 @@ This application:
 6. Updates leads in Bitrix24 with the analysis
 """
 
+import asyncio
 import logging
 import re
 import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
@@ -136,7 +138,7 @@ async def root() -> dict:
         "status": "ok",
         "service": "Meeting Bot",
         "version": "1.0.0",
-        "timestamp": __import__('datetime').datetime.utcnow().isoformat() + "Z"
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -148,7 +150,7 @@ async def health_check() -> dict:
         "status": "healthy" if not config_errors else "degraded",
         "config_valid": len(config_errors) == 0,
         "missing_config": config_errors if config_errors else None,
-        "timestamp": __import__('datetime').datetime.utcnow().isoformat() + "Z"
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -199,15 +201,19 @@ async def handle_webhook(request: Request, rate_limit: str = Depends(RateLimiter
         logger.debug("Empty message received")
         return {"status": "ok", "message": "Empty message"}
     
-    # Parse URL and optional lead ID
-    match = re.search(r'(https?://\S+)(?:\s+id:(\d+))?', text, re.IGNORECASE)
+    # Parse URL and optional lead ID with improved regex
+    url_pattern = r'(https?://[^\s]+?)(?:\s+id:(\d+))?\s*$'
+    match = re.search(url_pattern, text, re.IGNORECASE)
     
     if not match:
         logger.info(f"No valid URL found in message: {text[:100]}")
-        await send_telegram_message("❌ Пожалуйста, отправьте ссылку на встречу в формате:\nhttps://meet.google.com/xxx-yyy-zzz id:123")
+        await send_telegram_message(
+            "❌ Пожалуйста, отправьте ссылку на встречу в формате:\n"
+            "https://meet.google.com/xxx-yyy-zzz id:123"
+        )
         return {"status": "ok", "message": "No URL found"}
     
-    url = match.group(1)
+    url = match.group(1).rstrip(',')
     lead_id = match.group(2) if match.group(2) else "без_ID"
     
     logger.info(f"📞 Processing meeting: {url[:50]}... Lead ID: {lead_id}")
@@ -233,17 +239,21 @@ async def process_meeting_safe(url: str, lead_id: str) -> None:
 
 
 async def send_telegram_message(text: str) -> bool:
-    """Send message to configured Telegram user."""
+    """Send message to configured Telegram user with retry logic."""
     if not bot or not TELEGRAM_USER_ID:
         logger.warning("Telegram bot or user ID not configured")
         return False
     
-    try:
-        await bot.send_message(chat_id=TELEGRAM_USER_ID, text=text)
-        return True
-    except Exception as e:
-        logger.error(f"Failed to send Telegram message: {e}")
-        return False
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            await bot.send_message(chat_id=TELEGRAM_USER_ID, text=text)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send Telegram message (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+    return False
 
 
 async def process_meeting(url: str, lead_id: str) -> str:
@@ -256,26 +266,58 @@ async def process_meeting(url: str, lead_id: str) -> str:
         
     Returns:
         Analysis report text
+        
+    Raises:
+        ValueError: If meeting URL is invalid
+        RuntimeError: If meeting processing fails
     """
     logger.info(f"🎯 Starting full meeting processing for {url}")
     
-    # Initialize LangChain agent if not already done
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0, api_key=Config.GEMINI_API_KEY)
+    # Validate URL format
+    if not re.match(r'^https?://', url):
+        raise ValueError(f"Invalid meeting URL: {url}")
+    
+    # Initialize LangChain agent with proper error handling
+    try:
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash",
+            temperature=0,
+            api_key=Config.GEMINI_API_KEY,
+            max_retries=3
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize LLM: {e}")
+        raise RuntimeError(f"LLM initialization failed: {e}")
+    
     tools = [
         MeetingTools.join_and_record_meeting,
         MeetingTools.transcribe_audio,
         MeetingTools.analyze_transcript,
         MeetingTools.update_bitrix_lead
     ]
-    agent = create_structured_chat_agent(llm, tools, prompt)
-    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
     
-    # Execute the agent
-    result = await agent_executor.ainvoke({
-        "input": f"Подключись к встрече по ссылке {url} с ID {lead_id}. Расшифруй аудио, проанализируй транскрипцию и обнови лид."
-    })
+    try:
+        agent = create_structured_chat_agent(llm, tools, prompt)
+        agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True)
+    except Exception as e:
+        logger.error(f"Failed to create agent: {e}")
+        raise RuntimeError(f"Agent creation failed: {e}")
     
-    return result.get("output", "Отчёт не был сгенерирован.")
+    # Execute the agent with timeout protection
+    try:
+        result = await asyncio.wait_for(
+            agent_executor.ainvoke({
+                "input": f"Подключись к встрече по ссылке {url} с ID {lead_id}. Расшифруй аудио, проанализируй транскрипцию и обнови лид."
+            }),
+            timeout=Config.MEETING_TIMEOUT + 300  # Add 5 minutes buffer
+        )
+        return result.get("output", "Отчёт не был сгенерирован.")
+    except asyncio.TimeoutError:
+        logger.error(f"Meeting processing timed out after {Config.MEETING_TIMEOUT + 300}s")
+        raise RuntimeError("Meeting processing timed out")
+    except Exception as e:
+        logger.error(f"Agent execution failed: {e}", exc_info=True)
+        raise RuntimeError(f"Meeting analysis failed: {e}")
 
 
 if __name__ == "__main__":
