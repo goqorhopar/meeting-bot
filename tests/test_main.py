@@ -1,10 +1,73 @@
 # Test Suite for Meeting Bot
-# Run with: pytest tests/
+# Run with: pytest tests/ -v
 
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, Mock
 from datetime import datetime
+import sys
+from types import ModuleType
+
+
+# Create mock modules BEFORE any imports that might depend on them
+def create_mock_modules():
+    """Create and register mock modules for heavy dependencies."""
+    
+    # Mock whisper
+    mock_whisper = ModuleType('whisper')
+    mock_whisper.load_audio = Mock(return_value=None)
+    mock_whisper.load_model = Mock(return_value=Mock())
+    mock_whisper.Whisper = Mock()  # Add Whisper class
+    sys.modules['whisper'] = mock_whisper
+    
+    # Mock google.generativeai
+    mock_genai = ModuleType('google.generativeai')
+    mock_genai.configure = Mock()
+    mock_genai.GenerativeModel = Mock()
+    sys.modules['google.generativeai'] = mock_genai
+    
+    # Mock langchain modules
+    mock_langchain_agents = ModuleType('langchain.agents')
+    mock_langchain_agents.tool = lambda x: x
+    mock_langchain_agents.AgentExecutor = Mock()
+    mock_langchain_agents.create_structured_chat_agent = Mock()
+    sys.modules['langchain.agents'] = mock_langchain_agents
+    
+    mock_langchain_community = ModuleType('langchain_community')
+    mock_langchain_community.chat_models = ModuleType('langchain_community.chat_models')
+    mock_langchain_community.chat_models.ChatGoogleGenerativeAI = Mock()
+    sys.modules['langchain_community'] = mock_langchain_community
+    sys.modules['langchain_community.chat_models'] = mock_langchain_community.chat_models
+    
+    mock_langchain_core = ModuleType('langchain_core')
+    mock_langchain_core.prompts = ModuleType('langchain_core.prompts')
+    mock_langchain_core.prompts.ChatPromptTemplate = Mock()
+    mock_langchain_core.prompts.ChatPromptTemplate.from_messages = Mock(return_value=Mock())
+    sys.modules['langchain_core'] = mock_langchain_core
+    sys.modules['langchain_core.prompts'] = mock_langchain_core.prompts
+    
+    # Mock aiogram
+    mock_aiogram = ModuleType('aiogram')
+    mock_aiogram.Bot = Mock()
+    mock_aiogram.enums = ModuleType('aiogram.enums')
+    mock_aiogram.enums.ParseMode = Mock()
+    mock_aiogram.client = ModuleType('aiogram.client')
+    mock_aiogram.client.default = ModuleType('aiogram.client.default')
+    mock_aiogram.client.default.DefaultBotProperties = Mock()
+    sys.modules['aiogram'] = mock_aiogram
+    sys.modules['aiogram.enums'] = mock_aiogram.enums
+    sys.modules['aiogram.client'] = mock_aiogram.client
+    sys.modules['aiogram.client.default'] = mock_aiogram.client.default
+    
+    # Also need to mock tools module since it has module-level initialization
+    mock_tools = ModuleType('tools')
+    mock_tools.MeetingTools = Mock()
+    mock_tools.initialize_models = Mock()
+    sys.modules['tools'] = mock_tools
+
+
+# Initialize mocks before any other imports
+create_mock_modules()
 
 
 class TestConfig:
@@ -12,12 +75,16 @@ class TestConfig:
 
     def test_config_validation_missing_vars(self):
         """Test that config validation detects missing variables."""
-        with patch('config.Config.API_TOKEN', None), \
-             patch('config.Config.GEMINI_API_KEY', None), \
-             patch('config.Config.BITRIX_WEBHOOK', None), \
-             patch('config.Config.TELEGRAM_USER_ID', None):
-            from config import Config
-            errors = Config.validate_config()
+        # Reload config to get fresh state
+        import importlib
+        import config
+        importlib.reload(config)
+        
+        with patch.object(config.Config, 'API_TOKEN', None), \
+             patch.object(config.Config, 'GEMINI_API_KEY', None), \
+             patch.object(config.Config, 'BITRIX_WEBHOOK', None), \
+             patch.object(config.Config, 'TELEGRAM_USER_ID', None):
+            errors = config.Config.validate_config()
             assert len(errors) == 4
             assert 'TELEGRAM_BOT_TOKEN' in errors
             assert 'GEMINI_API_KEY' in errors
@@ -26,26 +93,31 @@ class TestConfig:
 
     def test_config_create_directories(self, tmp_path):
         """Test directory creation."""
-        with patch('config.Config.BASE_DIR', tmp_path):
-            from config import Config
-            Config.RECORDINGS_DIR = tmp_path / "recordings"
-            Config.TRANSCRIPTS_DIR = tmp_path / "transcripts"
-            Config.REPORTS_DIR = tmp_path / "reports"
-            Config.create_directories()
+        import importlib
+        import config
+        importlib.reload(config)
+        
+        with patch.object(config.Config, 'BASE_DIR', tmp_path):
+            config.Config.RECORDINGS_DIR = tmp_path / "recordings"
+            config.Config.TRANSCRIPTS_DIR = tmp_path / "transcripts"
+            config.Config.REPORTS_DIR = tmp_path / "reports"
+            config.Config.create_directories()
             
-            assert Config.RECORDINGS_DIR.exists()
-            assert Config.TRANSCRIPTS_DIR.exists()
-            assert Config.REPORTS_DIR.exists()
+            assert config.Config.RECORDINGS_DIR.exists()
+            assert config.Config.TRANSCRIPTS_DIR.exists()
+            assert config.Config.REPORTS_DIR.exists()
 
     def test_is_production(self):
         """Test production mode detection."""
-        with patch('os.getenv', return_value='production'):
-            from config import Config
-            assert Config.is_production() is True
+        import importlib
+        import config
+        importlib.reload(config)
         
-        with patch('os.getenv', return_value='development'):
-            from config import Config
-            assert Config.is_production() is False
+        with patch('config.os.getenv', return_value='production'):
+            assert config.Config.is_production() is True
+        
+        with patch('config.os.getenv', return_value='development'):
+            assert config.Config.is_production() is False
 
 
 class TestHealthEndpoints:
@@ -54,6 +126,12 @@ class TestHealthEndpoints:
     @pytest.mark.asyncio
     async def test_root_endpoint(self):
         """Test root health endpoint."""
+        import importlib
+        
+        # Reload main module with mocks in place
+        if 'main' in sys.modules:
+            importlib.reload(sys.modules['main'])
+        
         from main import app
         from fastapi.testclient import TestClient
         
@@ -69,6 +147,11 @@ class TestHealthEndpoints:
     @pytest.mark.asyncio
     async def test_health_endpoint(self):
         """Test detailed health endpoint."""
+        import importlib
+        
+        if 'main' in sys.modules:
+            importlib.reload(sys.modules['main'])
+            
         from main import app
         from fastapi.testclient import TestClient
         
@@ -88,6 +171,11 @@ class TestWebhookValidation:
     @pytest.mark.asyncio
     async def test_webhook_invalid_json(self):
         """Test webhook with invalid JSON."""
+        import importlib
+        
+        if 'main' in sys.modules:
+            importlib.reload(sys.modules['main'])
+            
         from main import app
         from fastapi.testclient import TestClient
         
@@ -100,6 +188,11 @@ class TestWebhookValidation:
     @pytest.mark.asyncio
     async def test_webhook_empty_message(self):
         """Test webhook with empty message."""
+        import importlib
+        
+        if 'main' in sys.modules:
+            importlib.reload(sys.modules['main'])
+            
         from main import app
         from fastapi.testclient import TestClient
         
@@ -113,6 +206,11 @@ class TestWebhookValidation:
     @pytest.mark.asyncio
     async def test_webhook_unauthorized_user(self):
         """Test webhook from unauthorized user."""
+        import importlib
+        
+        if 'main' in sys.modules:
+            importlib.reload(sys.modules['main'])
+            
         from main import app
         from fastapi.testclient import TestClient
         
@@ -174,7 +272,11 @@ class TestMeetingTools:
 
     def test_update_bitrix_no_webhook(self):
         """Test Bitrix update without webhook configured."""
-        with patch('config.Config.BITRIX_WEBHOOK', None):
+        import importlib
+        import config
+        importlib.reload(config)
+        
+        with patch.object(config.Config, 'BITRIX_WEBHOOK', None):
             from tools import MeetingTools
             
             result = MeetingTools.update_bitrix_lead.func("123", "test analysis")
@@ -182,7 +284,11 @@ class TestMeetingTools:
 
     def test_update_bitrix_invalid_lead_id(self):
         """Test Bitrix update with invalid lead ID."""
-        with patch('config.Config.BITRIX_WEBHOOK', "https://test.webhook"):
+        import importlib
+        import config
+        importlib.reload(config)
+        
+        with patch.object(config.Config, 'BITRIX_WEBHOOK', "https://test.webhook"):
             from tools import MeetingTools
             
             result = MeetingTools.update_bitrix_lead.func("invalid", "test")
@@ -208,6 +314,11 @@ class TestSecurity:
 
     def test_cors_configuration(self):
         """Test CORS middleware is configured."""
+        import importlib
+        
+        if 'main' in sys.modules:
+            importlib.reload(sys.modules['main'])
+            
         from main import app
         
         # Check CORS middleware is present
@@ -216,6 +327,11 @@ class TestSecurity:
 
     def test_rate_limiter_configured(self):
         """Test rate limiter is configured for webhook."""
+        import importlib
+        
+        if 'main' in sys.modules:
+            importlib.reload(sys.modules['main'])
+            
         from main import app
         
         # Check webhook endpoint exists
@@ -226,6 +342,11 @@ class TestSecurity:
 @pytest.mark.asyncio
 async def test_async_background_task():
     """Test background task processing."""
+    import importlib
+    
+    if 'main' in sys.modules:
+        importlib.reload(sys.modules['main'])
+        
     from main import process_meeting_safe
     
     # Mock the dependencies
